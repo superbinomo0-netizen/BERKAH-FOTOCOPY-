@@ -1,28 +1,65 @@
 const CACHE_NAME = 'berkah-fotocopy-v1';
-const ASSETS = [
-  '/BERKAH-FOTOCOPY-/KASIR.html',
-  '/BERKAH-FOTOCOPY-/manifest.json'
+const ASSETS_TO_CACHE = [
+  './',
+  './docu.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
+// Event Install: Menyimpan aset ke dalam cache
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then((cache) => {
+      return cache.addAll(ASSETS_TO_CACHE);
+    })
   );
   self.skipWaiting();
 });
 
+// Event Activate: Membersihkan cache lama jika ada pembaruan versi
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((cacheNames) => {
+      return Promise.all(
+        cacheNames.map((cache) => {
+          if (cache !== CACHE_NAME) {
+            return caches.delete(cache);
+          }
+        })
+      );
+    })
+  );
+  self.clients.claim();
 });
 
+// Event Fetch: Mengambil dari cache terlebih dahulu, lalu jaringan (Cache First, Network Fallback)
 self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        const resClone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone));
-        return response;
-      })
-      .catch(() => caches.match(event.request))
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+      return fetch(event.request)
+        .then((networkResponse) => {
+          // Simpan salinan respons baru ke cache jika valid
+          if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+            return networkResponse;
+          }
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+          return networkResponse;
+        })
+        .catch(() => {
+          // Fallback ke halaman utama jika offline
+          if (event.request.mode === 'navigate') {
+            return caches.match('./docu.html');
+          }
+        });
+    })
   );
 });
